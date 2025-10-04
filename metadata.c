@@ -4,24 +4,120 @@
 # include <string.h>
 # include <cjson/cJSON.h>
 
-# define NAME "name";
-
 char *readFile(const char *filename);
 void metadataLoad(Metadata *db, const char *filename); // load json into struct Metadata
-void metadataAddNote(Metadata *db, const char *name, const char *link, char **tags, int tagCount); // add to struct
+void metadataAddNote(Metadata *db, const char *name, const char *link, const char *content, char **tags, int tagCount); // add to struct
 void metadataSave(Metadata *db, const char *filename); // save struct memory into metadata.json
+Note* metadataFindNote(Metadata *db, const char *name); // find and return note by name
+void metadataRemoveNote(Metadata *db, const char *name); // remove note from metadata.json
+
+void metadataRemoveNote(Metadata *db, const char *name) {
+    for (int i=0;i<db->count;i++) {
+        if (strcmp(db->notes[i].name,name) == 0) {
+            free(db->notes[i].name);
+            free(db->notes[i].link);
+            free(db->notes[i].content);
+            for (int j=0;j<db->notes[i].tagCount;j++) {
+                free(db->notes[i].tags[j]);
+            }
+            free(db->notes[i].tags);
+            for (int j=i;j<db->count-1;j++) {
+                db->notes[j] = db->notes[j+1];
+            }
+            db->count--;
+            if (db->count > 0) {
+                db->notes = realloc(db->notes, db->count * sizeof(Note));
+            } else {
+                free(db->notes);
+                db->notes = NULL;
+            }
+            break;
+        }
+    }
+}
+
+void metadataAddNote(Metadata *db, const char *name, const char *link, const char *content, char **tags, int tagCount) {
+    Note *check = metadataFindNote(db, name);
+    if (check) {
+        fprintf(stderr,"note %s already exists",name);
+        return;
+    }
+
+    int newCount = db->count + 1;
+    db->notes = realloc(db->notes, newCount * sizeof(Note));
+
+    Note newNote;
+    newNote.name = strdup(name);
+    newNote.link = strdup(link);
+    newNote.content = strdup(content);
+
+    newNote.tags = malloc(sizeof(char*) * tagCount);
+    for (int i=0;i<tagCount;i++) {
+        newNote.tags[i] = strdup(tags[i]);
+    }
+    newNote.tagCount = tagCount;
+
+    db->notes[newCount - 1] = newNote;
+    db->count = newCount;
+}
+
+void metadataSave(Metadata *db, const char *filename) {
+    cJSON *json = cJSON_CreateObject();
+    cJSON *notesArray = cJSON_CreateArray();
+    cJSON_AddItemToObject(json,"notes",notesArray);
+
+    for (int i=0;i<db->count;i++) {
+        cJSON *noteObj = cJSON_CreateObject();
+        Note n = db->notes[i];
+        cJSON_AddStringToObject(noteObj , "name", n.name);
+        cJSON_AddStringToObject(noteObj , "link", n.link);
+        cJSON_AddStringToObject(noteObj , "content", n.content);
+        cJSON *tags = cJSON_CreateArray();
+        for (int j=0;j<n.tagCount;j++) {
+            cJSON_AddItemToArray(tags, cJSON_CreateString(n.tags[j]));
+        }
+        cJSON_AddItemToObject(noteObj,"tags",tags);
+
+        cJSON_AddItemToArray(notesArray,noteObj);
+    }
+    char *string = cJSON_Print(json);
+    if (!string) {
+        fprintf(stderr,"failed to save metadata to json.\n");
+        return;
+    }
+    FILE *fp;
+    fp = fopen(filename,"w+");
+    if (!fp) {
+        fprintf(stderr,"failed to write to metadata.json\n");
+        return;
+    }
+    fputs(string,fp);
+    fputc('\n',fp);
+    fclose(fp);
+    printf("updated db!");
+
+    free(string);
+    cJSON_Delete(json);
+}
 
 void metadataLoad(Metadata *db, const char *filename) {
     const cJSON *notes = NULL; 
     const cJSON *note = NULL; 
     const cJSON *name = NULL; 
     const cJSON *link = NULL; 
+    const cJSON *content = NULL;
     const cJSON *tags = NULL;
+
+    if (db->notes) {
+        metadataFree(db);
+    }
+    db->notes = NULL;
+    db->count = 0;
 
     char *raw = readFile(filename);
     if (!raw) {
         fprintf(stderr, "failed to read file %s\n",filename);
-        goto end;
+        return;
     }
     cJSON *metadata = cJSON_Parse(raw);
 
@@ -30,14 +126,14 @@ void metadataLoad(Metadata *db, const char *filename) {
         if (error_ptr != NULL) {
             fprintf(stderr, "error before: %s\n", error_ptr);
         }
-        goto end;
+        return;
     }
 
     notes = cJSON_GetObjectItemCaseSensitive(metadata,"notes");
     if (!cJSON_IsArray(notes)) {
         fprintf(stderr,"no notes array found in metadata.json\n");
         cJSON_Delete(metadata);
-        goto end;
+        return;
     }
 
     int num_notes = cJSON_GetArraySize(notes);
@@ -48,11 +144,12 @@ void metadataLoad(Metadata *db, const char *filename) {
     int i = 0;
     cJSON_ArrayForEach(note, notes) {
         Note n = {0};
-        n.name = NULL; n.link = NULL; n.tags = NULL;
+        n.name = NULL; n.link = NULL; n.content = NULL; n.tags = NULL;
         n.tagCount = 0;
 
         name = cJSON_GetObjectItemCaseSensitive(note, "name");
         link = cJSON_GetObjectItemCaseSensitive(note, "link");
+        content = cJSON_GetObjectItemCaseSensitive(note, "content");
         tags = cJSON_GetObjectItemCaseSensitive(note, "tags");
 
         if (cJSON_IsString(name) && name->valuestring) {
@@ -60,6 +157,9 @@ void metadataLoad(Metadata *db, const char *filename) {
         }
         if (cJSON_IsString(link) && link->valuestring) {
             n.link= strdup(link->valuestring);
+        }
+        if (cJSON_IsString(content) && content->valuestring) {
+            n.content = strdup(content->valuestring);
         }
         if (cJSON_IsArray(tags)) {
             int num_tags = cJSON_GetArraySize(tags);
@@ -77,20 +177,18 @@ void metadataLoad(Metadata *db, const char *filename) {
         db->notes[i++] = n;
     }
 
-    for(int i=0;i<num_notes;i++) {
-        printf("NOTE: %s\n",db->notes[i].name);
-        printf("link to %s: %s\n",db->notes[i].name, db->notes[i].link);
-        printf("tags to %s: ",db->notes[i].name);
-        for(int j=0;j<db->notes[i].tagCount - 1;j++) {
-            printf("%s, ",db->notes[i].tags[j]);
-        }
-        printf("%s\n",db->notes[i].tags[db->notes[i].tagCount - 1]);
-        printf("=============\n");
-    }
+    free(raw);
+    return;
+}
 
-end:
-    if (metadata) cJSON_Delete(metadata);
-    if (raw) free(raw);
+Note* metadataFindNote(Metadata *db, const char *name) {
+    for (int i = 0;i<db->count;i++) {
+        if (strcmp(db->notes[i].name,name) == 0) {
+            // return pointer to the correct note
+            return &db->notes[i]; 
+        }
+    }
+    return NULL;
 }
 
 char *readFile(const char *filename) {
@@ -118,6 +216,7 @@ void metadataFree(Metadata *db) {
     for (int i = 0;i < db->count;i++) {
         free(db->notes[i].name);
         free(db->notes[i].link);
+        free(db->notes[i].content);
         for (int j=0;j<db->notes[i].tagCount;j++) {
             free(db->notes[i].tags[j]);
         }
