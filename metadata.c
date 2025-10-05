@@ -3,10 +3,14 @@
 # include <stdlib.h>
 # include <string.h>
 # include <cjson/cJSON.h>
+# include <unistd.h>
+# include <errno.h>
+
+# define EDITOR "nvim"
 
 char *readFile(const char *filename);
 void metadataLoad(Metadata *db, const char *filename); // load json into struct Metadata
-void metadataAddNote(Metadata *db, const char *name, const char *link, const char *content, char **tags, int tagCount); // add to struct
+void metadataAddNote(Metadata *db, const char *name, const char *link,const char **tags, int tagCount,int useMarkdown); 
 void metadataSave(Metadata *db, const char *filename); // save struct memory into metadata.json
 Note* metadataFindNote(Metadata *db, const char *name); // find and return note by name
 void metadataRemoveNote(Metadata *db, const char *name); // remove note from metadata.json
@@ -14,9 +18,26 @@ void metadataRemoveNote(Metadata *db, const char *name); // remove note from met
 void metadataRemoveNote(Metadata *db, const char *name) {
     for (int i=0;i<db->count;i++) {
         if (strcmp(db->notes[i].name,name) == 0) {
+            const char *filePath = db->notes[i].file;
+            char fullPath[512];
+
+            if (filePath) {
+                snprintf(fullPath, sizeof(fullPath), "%s", filePath);
+            } else {
+                fullPath[0] = '\0';
+            }
+
+            if (fullPath[0] && access(fullPath, F_OK) == 0) {
+                if (remove(fullPath) == 0) {
+                    printf("file %s deleted successfully\n",fullPath);
+                } else {
+                    perror("failed to delete file\n");
+                }
+            }
+
             free(db->notes[i].name);
+            free(db->notes[i].file);
             free(db->notes[i].link);
-            free(db->notes[i].content);
             for (int j=0;j<db->notes[i].tagCount;j++) {
                 free(db->notes[i].tags[j]);
             }
@@ -36,20 +57,81 @@ void metadataRemoveNote(Metadata *db, const char *name) {
     }
 }
 
-void metadataAddNote(Metadata *db, const char *name, const char *link, const char *content, char **tags, int tagCount) {
+void metadataAddNote(Metadata *db, const char *name, const char *link,const char **tags, int tagCount,int useMarkdown) {
     Note *check = metadataFindNote(db, name);
     if (check) {
-        fprintf(stderr,"note %s already exists",name);
+        fprintf(stderr,"note %s already exists\n",name);
         return;
     }
 
+    const char *home = getenv("HOME");
+    if (!home) {
+        fprintf(stderr,"couldn't find HOME env variable\n");
+        return;
+    }
+
+    const char *ext = useMarkdown ? ".md" : ".txt";
+
+    size_t dirpathLen = strlen(home) + 7 + 1;
+    char *dirPath = malloc(dirpathLen);
+    if (!dirPath) {
+        fprintf(stderr,"malloc failed [dirPath]\n");
+        return;
+    }
+    snprintf(dirPath, dirpathLen, "%s/.notes", home);
+
+    char mkdirCmd[512];
+    snprintf(mkdirCmd, sizeof(mkdirCmd), "mkdir -p %s", dirPath);
+    system(mkdirCmd);
+
+
+    size_t notePathLen = strlen(dirPath) + 1 + strlen(name) + strlen(ext) + 1; // "/" + <ext> + null
+    char *notePath = malloc(notePathLen);
+    if (!notePath) {
+        fprintf(stderr,"malloc failed [notePath]\n");
+        return;
+    }
+    snprintf(notePath, notePathLen, "%s/%s%s", dirPath,name,ext);
+
+    FILE *fp = fopen(notePath,"a+");
+    if (!fp) {
+        fprintf(stderr,"failed to create note file %s", notePath);
+        return;
+    }
+    fclose(fp);
+
+    char openCmd[512];
+    snprintf(openCmd, sizeof(openCmd), "%s %s", EDITOR, notePath);
+    system(openCmd);
+
     int newCount = db->count + 1;
-    db->notes = realloc(db->notes, newCount * sizeof(Note));
+    Note *temp = realloc(db->notes, newCount * sizeof(Note));
+    if (!temp) {
+        fprintf(stderr,"failed to reallocate memory.\n");
+        return;
+    }
+    db->notes = temp;
 
     Note newNote;
     newNote.name = strdup(name);
-    newNote.link = strdup(link);
-    newNote.content = strdup(content);
+    if (link) {
+        newNote.link = strdup(link);
+    } else {
+        newNote.link = NULL;
+    }
+
+    size_t fileLen = strlen(notePath) + 1;
+    newNote.file = malloc(fileLen);
+    snprintf(newNote.file, fileLen, "%s", notePath);
+
+    if (link) {
+        FILE *linkCheck = fopen(link,"r");
+        if (!linkCheck) {
+            fprintf(stderr,"Warning: link file '%s' does not exist.\n",link);
+        } else {
+            fclose(linkCheck);
+        }
+    }
 
     newNote.tags = malloc(sizeof(char*) * tagCount);
     for (int i=0;i<tagCount;i++) {
@@ -59,6 +141,9 @@ void metadataAddNote(Metadata *db, const char *name, const char *link, const cha
 
     db->notes[newCount - 1] = newNote;
     db->count = newCount;
+
+    free(notePath);
+    free(dirPath);
 }
 
 void metadataSave(Metadata *db, const char *filename) {
@@ -70,8 +155,8 @@ void metadataSave(Metadata *db, const char *filename) {
         cJSON *noteObj = cJSON_CreateObject();
         Note n = db->notes[i];
         cJSON_AddStringToObject(noteObj , "name", n.name);
+        cJSON_AddStringToObject(noteObj , "file", n.file);
         cJSON_AddStringToObject(noteObj , "link", n.link);
-        cJSON_AddStringToObject(noteObj , "content", n.content);
         cJSON *tags = cJSON_CreateArray();
         for (int j=0;j<n.tagCount;j++) {
             cJSON_AddItemToArray(tags, cJSON_CreateString(n.tags[j]));
@@ -104,8 +189,8 @@ void metadataLoad(Metadata *db, const char *filename) {
     const cJSON *notes = NULL; 
     const cJSON *note = NULL; 
     const cJSON *name = NULL; 
+    const cJSON *file = NULL;
     const cJSON *link = NULL; 
-    const cJSON *content = NULL;
     const cJSON *tags = NULL;
 
     if (db->notes) {
@@ -144,23 +229,26 @@ void metadataLoad(Metadata *db, const char *filename) {
     int i = 0;
     cJSON_ArrayForEach(note, notes) {
         Note n = {0};
-        n.name = NULL; n.link = NULL; n.content = NULL; n.tags = NULL;
+        n.name = NULL; n.link = NULL; n.tags = NULL;
         n.tagCount = 0;
 
         name = cJSON_GetObjectItemCaseSensitive(note, "name");
+        file = cJSON_GetObjectItemCaseSensitive(note, "file");
         link = cJSON_GetObjectItemCaseSensitive(note, "link");
-        content = cJSON_GetObjectItemCaseSensitive(note, "content");
         tags = cJSON_GetObjectItemCaseSensitive(note, "tags");
 
         if (cJSON_IsString(name) && name->valuestring) {
             n.name = strdup(name->valuestring);
         }
+
+        if (cJSON_IsString(file) && file->valuestring) {
+            n.file = strdup(file->valuestring);
+        }
+
         if (cJSON_IsString(link) && link->valuestring) {
             n.link= strdup(link->valuestring);
         }
-        if (cJSON_IsString(content) && content->valuestring) {
-            n.content = strdup(content->valuestring);
-        }
+
         if (cJSON_IsArray(tags)) {
             int num_tags = cJSON_GetArraySize(tags);
             n.tags = malloc(sizeof(char*) * num_tags);
@@ -215,8 +303,8 @@ void metadataFree(Metadata *db) {
 
     for (int i = 0;i < db->count;i++) {
         free(db->notes[i].name);
+        free(db->notes[i].file);
         free(db->notes[i].link);
-        free(db->notes[i].content);
         for (int j=0;j<db->notes[i].tagCount;j++) {
             free(db->notes[i].tags[j]);
         }

@@ -1,38 +1,81 @@
-#include "metadata.h"
-#include <stdio.h>
+# include "metadata.h"
+# include <stdio.h>
+# include <stdlib.h>
+# include <string.h>
 
-int main() {
-    Metadata db = {NULL, 0};
+# define SOURCE "metadata.json"
+int useMarkdown = 0;
 
-    metadataLoad(&db, "metadata.json");
+/*
+pen add rotate -l rotate.c -t algo rotation
+*/
 
-    char *tags1[] = {"algo", "rotation"};
-    metadataAddNote(&db, "rotate", "rotate.c", "rotate function", tags1, 2);
+int main(int argc, char **argv) {
+    Metadata db = {NULL,0};
+    metadataLoad(&db, SOURCE);
 
-    char *tags2[] = {"algo", "sorting", "divide_and_conquer"};
-    metadataAddNote(&db, "merge_sort", "merge_sort.c", "merge sort implementation", tags2, 3);
-
-    // testing adding duplicate
-    metadataAddNote(&db, "rotate", "rotate.c", "rotate function", tags1, 2);
-
-    // print all notes
-    for (int i = 0; i < db.count; i++) {
-        Note *n = &db.notes[i];
-        printf("NOTE: %s\nLINK: %s\nCONTENT: %s\nTAGS: ", n->name, n->link, n->content);
-        for (int j = 0; j < n->tagCount; j++) {
-            printf("%s, ", n->tags[j]);
-        }
-        printf("\n---\n");
+    if (argc < 2) {
+        printf("Usage: pen [add|remove|list|find] ...\n");
+        return 1;
     }
 
-    // find and print note
-    Note *found = metadataFindNote(&db, "merge_sort");
-    if (found) printf("Found note: %s\n", found->name);
+    if (strcmp(argv[1],"add") == 0) {
+        if (argc < 3) {
+            fprintf(stderr,"Usage: pen add [-md | -pt] <name> [-l link] [-t tags...]\n");
+        }
 
-    // save and clean
-    metadataSave(&db, "metadata.json");
-    metadataFree(&db);
+        int useMarkdown = 0;
+        const char *name = argv[2];
+        const char *link = NULL;
+        char **tags = NULL;
+        int tagCount = 0;
+        int i = 2; // start parsing only after "add"
+        
+        if (strcmp(argv[i],"-md") == 0) {
+            useMarkdown = 1;
+            i++;
+        } else if (strcmp(argv[i],"-pt") == 0) {
+            useMarkdown = 0;
+            i++;
+        }
 
-    return 0;
+        if (i>=argc) {
+            fprintf(stderr,"Error: missing note name\n");
+            return 1;
+        }
+        name = argv[i++];
+
+        while (i<argc) {
+            if (strcmp(argv[i],"-l") == 0) {
+                link = argv[++i];
+            } else if (strcmp(argv[i],"-t") == 0) {
+                int start = ++i;
+                tagCount = argc - start;
+                tags = &argv[start];
+                 break;
+            }
+            i++;
+        }
+
+        metadataAddNote(&db,name,link,(const char **)tags,tagCount,useMarkdown);
+        metadataSave(&db, SOURCE);
+
+    }
+
+    if (strcmp(argv[1],"remove") == 0) {
+        if (argc < 3) {
+            fprintf(stderr,"Usage: pen add [-md | -pt] <name> [-l link] [-t tags...]\n");
+            return 1;
+        }
+        const char *name = argv[2];
+
+        if (!metadataFindNote(&db, name)) {
+            fprintf(stderr,"Note %s does not exist.\n", name);
+        }
+
+        metadataRemoveNote(&db, name);
+        metadataSave(&db, SOURCE);
+
+    }
 }
 
