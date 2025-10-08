@@ -20,5 +20,5 @@ void metadataAddNote(Metadata *db, const char *name, const char *link,const char
 Note *metadataFindNote(Metadata *db, const char *name);
 void metadataRemoveNote(Metadata *db, const char *name);
 void metadataFree(Metadata *db);
-
+void metadataList(Metadata *db, char **tags, int tagCount);
 

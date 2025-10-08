@@ -22,6 +22,7 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1],"add") == 0) {
         if (argc < 3) {
             fprintf(stderr,"Usage: pen add [-md | -pt] <name> [-l link] [-t tags...]\n");
+            return 1;
         }
 
         int useMarkdown = 0;
@@ -52,7 +53,7 @@ int main(int argc, char **argv) {
                 int start = ++i;
                 tagCount = argc - start;
                 tags = &argv[start];
-                 break;
+                break;
             }
             i++;
         }
@@ -76,6 +77,31 @@ int main(int argc, char **argv) {
         metadataRemoveNote(&db, name);
         metadataSave(&db, SOURCE);
 
+    }
+
+    if (strcmp(argv[1], "list") == 0) {
+        if (argc < 3) {
+            metadataList(&db, NULL, 0);
+            return 1;
+        }
+
+        int tagCount = 0;
+        char **tags = NULL;
+
+        // parsing after list
+        for (int i=2; i<argc; i++) {
+            if (strcmp(argv[i],"-t") == 0) {
+                int start = i+1;
+                if (start >= argc) {
+                    fprintf(stderr, "Error: -t requires at least one tag\n");
+                    return 1;
+                }
+                tagCount = argc - start;
+                tags = &argv[start];
+                break;
+            }
+        }
+        metadataList(&db, tags, tagCount);
     }
 }
 

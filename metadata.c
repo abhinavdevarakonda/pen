@@ -14,6 +14,8 @@ void metadataAddNote(Metadata *db, const char *name, const char *link,const char
 void metadataSave(Metadata *db, const char *filename); // save struct memory into metadata.json
 Note* metadataFindNote(Metadata *db, const char *name); // find and return note by name
 void metadataRemoveNote(Metadata *db, const char *name); // remove note from metadata.json
+void metadataFree(Metadata *db);
+void metadataList(Metadata *db, char **tags, int tagCount);
 
 void metadataRemoveNote(Metadata *db, const char *name) {
     for (int i=0;i<db->count;i++) {
@@ -313,4 +315,50 @@ void metadataFree(Metadata *db) {
     free(db->notes);
     db->notes = NULL;
     db->count = 0;
+}
+
+void metadataList(Metadata *db, char **tags, int tagCount) {
+    if (tags == NULL) {
+        for (int i=0;i<db->count;i++) {
+            Note note = db->notes[i];
+            printf("name: %s\n",note.name);
+            printf("filepath: %s\n",note.file);
+            printf("link: %s\n",note.link);
+            printf("tags: [");
+            for (int j=0;j<note.tagCount;j++) {
+                printf("%s",note.tags[j]);
+                if (j<note.tagCount - 1) printf(", ");
+            }
+            printf("]\n");
+            printf("--------------------\n");
+        }
+    } else {
+        for (int i=0;i<db->count;i++) {
+            Note note = db->notes[i];
+            int matchFound = 0;
+
+            for (int j=0;j<note.tagCount;j++) {
+                for (int k=0;k<tagCount;k++) {
+                    if (strcmp(note.tags[j],tags[k]) == 0) {
+                        matchFound = 1;
+                        break;
+                    }
+                }
+                if (matchFound) break;
+            }
+
+            if (matchFound) {
+                printf("name: %s\n", note.name);
+                printf("filepath: %s\n", note.file);
+                printf("link: %s\n", note.link);
+                printf("tags: [");
+                for (int j=0;j<note.tagCount;j++) {
+                    printf("%s",note.tags[j]);
+                    if (j<note.tagCount - 1) printf(", ");
+                }
+                printf("]\n");
+                printf("--------------------\n");
+            }
+        }
+    }
 }
