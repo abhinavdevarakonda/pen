@@ -1,24 +1,26 @@
-# compiler
 CC = gcc
-
-# compiler flags
 CFLAGS = -Wall -g
-
-# linker flags
 LDFLAGS = -lcjson
 
-# object files
 OBJS = main.o metadata.o
 
+PREFIX ?= /usr/local
+BINDIR = $(PREFIX)/bin
 
-# target binary
 pen: $(OBJS)
 	$(CC) $(CFLAGS) -o pen $(OBJS) $(LDFLAGS)
 
-# compile .c files to .o
 %.o: %.c
 	$(CC) $(CFLAGS) -c $<
 
-# clean up build files
+install: pen
+	# mkdir -p $(BINDIR)
+	# cp pen $(BINDIR)/pen
+	install -Dm755 pen $(BINDIR)/pen
+
+uninstall:
+	rm -f $(BINDIR)/pen
+
 clean:
 	rm -f *.o pen
+

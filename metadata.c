@@ -16,10 +16,16 @@ Note* metadataFindNote(Metadata *db, const char *name); // find and return note 
 void metadataRemoveNote(Metadata *db, const char *name); // remove note from metadata.json
 void metadataFree(Metadata *db);
 void metadataList(Metadata *db, char **tags, int tagCount);
+void metadataListHere(Metadata *db, const char *currentDir, const char *specificFile);
+void metadataEditNote(Metadata *db, const char *name);
 
 void metadataRemoveNote(Metadata *db, const char *name) {
+    char *cleanName = strdup(name);
+    char *dot = strrchr(cleanName, '.');
+    if (dot) *dot = '\0'; // Try without extension if extension provided
+
     for (int i=0;i<db->count;i++) {
-        if (strcmp(db->notes[i].name,name) == 0) {
+        if (strcmp(db->notes[i].name, name) == 0 || strcmp(db->notes[i].name, cleanName) == 0) {
             const char *filePath = db->notes[i].file;
             char fullPath[512];
 
@@ -57,12 +63,14 @@ void metadataRemoveNote(Metadata *db, const char *name) {
             break;
         }
     }
+    free(cleanName);
 }
 
 void metadataAddNote(Metadata *db, const char *name, const char *link,const char **tags, int tagCount,int useMarkdown) {
     Note *check = metadataFindNote(db, name);
     if (check) {
-        fprintf(stderr,"note %s already exists\n",name);
+        printf("Note '%s' already exists. Opening for edit...\n", name);
+        metadataEditNote(db, name);
         return;
     }
 
@@ -117,7 +125,33 @@ void metadataAddNote(Metadata *db, const char *name, const char *link,const char
     Note newNote;
     newNote.name = strdup(name);
     if (link) {
-        newNote.link = strdup(link);
+        char *tempLink = strdup(link);
+        char *colon = strchr(tempLink, ':');
+        char *suffix = NULL;
+        if (colon) {
+            suffix = strdup(colon);
+            *colon = '\0';
+        }
+
+        char absPath[4096];
+        if (realpath(tempLink, absPath)) {
+            size_t finalLen = strlen(absPath) + (suffix ? strlen(suffix) : 0) + 1;
+            newNote.link = malloc(finalLen);
+            snprintf(newNote.link, finalLen, "%s%s", absPath, suffix ? suffix : "");
+            
+            FILE *linkCheck = fopen(absPath, "r");
+            if (!linkCheck) {
+                fprintf(stderr, "Warning: link file '%s' does not exist.\n", absPath);
+            } else {
+                fclose(linkCheck);
+            }
+        } else {
+            newNote.link = strdup(link);
+            fprintf(stderr, "Warning: could not resolve path for '%s'. Storing as provided.\n", link);
+        }
+
+        if (suffix) free(suffix);
+        free(tempLink);
     } else {
         newNote.link = NULL;
     }
@@ -125,15 +159,6 @@ void metadataAddNote(Metadata *db, const char *name, const char *link,const char
     size_t fileLen = strlen(notePath) + 1;
     newNote.file = malloc(fileLen);
     snprintf(newNote.file, fileLen, "%s", notePath);
-
-    if (link) {
-        FILE *linkCheck = fopen(link,"r");
-        if (!linkCheck) {
-            fprintf(stderr,"Warning: link file '%s' does not exist.\n",link);
-        } else {
-            fclose(linkCheck);
-        }
-    }
 
     newNote.tags = malloc(sizeof(char*) * tagCount);
     for (int i=0;i<tagCount;i++) {
@@ -361,4 +386,66 @@ void metadataList(Metadata *db, char **tags, int tagCount) {
             }
         }
     }
+}
+
+void metadataListHere(Metadata *db, const char *currentDir, const char *specificFile) {
+    char absTarget[4096] = "";
+    if (specificFile) {
+        if (!realpath(specificFile, absTarget)) {
+            // Fallback: if file doesn't exist yet, we can't resolve it, 
+            // but we can still try matching the raw string
+            strncpy(absTarget, specificFile, sizeof(absTarget));
+        }
+    }
+
+    int found = 0;
+    for (int i = 0; i < db->count; i++) {
+        Note n = db->notes[i];
+        if (!n.link) continue; // Skip notes with no link
+
+        int match = 0;
+        if (specificFile && absTarget[0] != '\0') {
+            // Match against a specific file (absolute path or prefix)
+            if (strstr(n.link, absTarget) != NULL) {
+                match = 1;
+            }
+        } else if (currentDir) {
+            // Match against any file in the current directory
+            if (strncmp(n.link, currentDir, strlen(currentDir)) == 0) {
+                match = 1;
+            }
+        }
+
+        if (match) {
+            if (!found) {
+                printf("\n--- Notes in this context ---\n");
+                found = 1;
+            }
+            printf("[%s]\n", n.name);
+            printf("  Link: %s\n", n.link);
+            if (n.tagCount > 0) {
+                printf("  Tags: ");
+                for (int j = 0; j < n.tagCount; j++) {
+                    printf("#%s%s", n.tags[j], (j < n.tagCount - 1) ? " " : "");
+                }
+                printf("\n");
+            }
+            printf("-----------------------------\n");
+        }
+    }
+
+    if (!found) {
+        printf("No notes found for %s\n", specificFile ? specificFile : "this directory");
+    }
+}
+
+void metadataEditNote(Metadata *db, const char *name) {
+    Note *n = metadataFindNote(db, name);
+    if (!n) {
+        fprintf(stderr, "Note '%s' not found.\n", name);
+        return;
+    }
+    char openCmd[512];
+    snprintf(openCmd, sizeof(openCmd), "%s %s", EDITOR, n->file);
+    system(openCmd);
 }

@@ -21,4 +21,6 @@ Note *metadataFindNote(Metadata *db, const char *name);
 void metadataRemoveNote(Metadata *db, const char *name);
 void metadataFree(Metadata *db);
 void metadataList(Metadata *db, char **tags, int tagCount);
+void metadataListHere(Metadata *db, const char *currentDir, const char *specificFile);
+void metadataEditNote(Metadata *db, const char *name);
 

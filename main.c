@@ -2,6 +2,7 @@
 # include <stdio.h>
 # include <stdlib.h>
 # include <string.h>
+# include <unistd.h>
 
 # define SOURCE "metadata.json"
 int useMarkdown = 0;
@@ -102,6 +103,25 @@ int main(int argc, char **argv) {
             }
         }
         metadataList(&db, tags, tagCount);
+    }
+    if (strcmp(argv[1], "here") == 0) {
+        char cwd[4096];
+        if (getcwd(cwd, sizeof(cwd)) == NULL) {
+            perror("getcwd() error");
+            return 1;
+        }
+        const char *target = (argc > 2) ? argv[2] : NULL;
+        metadataListHere(&db, cwd, target);
+        return 0;
+    }
+
+    if (strcmp(argv[1], "edit") == 0) {
+        if (argc < 3) {
+            fprintf(stderr, "Usage: pen edit <name>\n");
+            return 1;
+        }
+        metadataEditNote(&db, argv[2]);
+        return 0;
     }
 }
 
